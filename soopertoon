@@ -1,0 +1,63 @@
+#!/usr/bin/env python
+"""
+Integrates SooperLooper and Toonloop
+
+Needs txosc.
+"""
+import sys
+from twisted.internet import reactor
+from txosc import osc
+from txosc import dispatch
+from txosc import async
+
+SOOPERLOOPER_LISTENING_PORT = 9951
+
+class PingPongApplication(object):
+    """
+    Sends and receives UDP OSC messages to and from SooperLooper.
+
+    @param receive_host: As seen by the host on which sooperlooper is running
+    """
+    def __init__(self, receive_port=16666, receive_host="127.0.0.1", verbose=True):
+        self.send_host = "127.0.0.1"
+        self.verbose = verbose
+        self.receive_host = receive_host
+        self.send_port = SOOPERLOOPER_LISTENING_PORT
+        self.receive_port = receive_port
+        self.receiver = dispatch.Receiver()
+        self.sender = async.DatagramClientProtocol()
+        self._sender_port = reactor.listenUDP(0, self.sender)
+        self._server_port = reactor.listenUDP(self.receive_port, async.DatagramServerProtocol(self.receiver))
+        print("Listening on osc.udp://localhost:%s" % (self.receive_port))
+        self.receiver.addCallback("/pong", self.pong_handler)
+        self.receiver.fallback = self.fallback
+        reactor.callLater(0.1, self._start)
+
+    def _send(self, *args):
+        if self.verbose:
+            print("Sending %s" % (str(args)))
+        self.sender.send(osc.Message(*args), (self.send_host, self.send_port))
+
+    def _start(self):
+        """
+        Initiates the OSC dialog with sooperlooper. 
+        """
+        self._send("/ping", "osc.udp://%s:%s" % (self.receive_host, self.receive_port), '/pong')
+
+    def pong_handler(self, message, address):
+        """
+        Method handler for /pong
+        """
+        host_url, sl_version, loopcount = message.getValues()
+        print("Got %s from %s" % (message, address))
+
+    def fallback(self, message, address):
+        """
+        Fallback for everything else we get.
+        """
+        print("Lost ball %s from %s" % (message, address))
+
+if __name__ == "__main__":
+    app = PingPongApplication()
+    reactor.run()
+
